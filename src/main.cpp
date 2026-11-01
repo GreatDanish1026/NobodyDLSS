@@ -715,6 +715,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
             reshade::register_overlay(RD_PRODUCT, &DrawOverlay);
             break;
         case DLL_PROCESS_DETACH:
+            rd::RewriteStartupOffs();  // after UE wrote its Engine.ini at exit
             rd::UnregisterFrameGen();
             rd::UnregisterUpscaler();
             descriptor_tracking::unregister_events();

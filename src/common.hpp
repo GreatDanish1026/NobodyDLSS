@@ -56,6 +56,8 @@ extern const char* const kGameNgxRestart;  // the message shown while it's runni
 bool GameFiSwapchainOn();
 void TurnGameFiSwapchainOff();
 extern const char* const kGameFiRestart;
+// Writes the lines above again (UE rewrites Engine.ini at exit, dropping them): at unload.
+void RewriteStartupOffs();
 
 // upscaler.cpp
 void RegisterUpscaler();

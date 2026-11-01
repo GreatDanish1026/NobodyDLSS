@@ -1185,14 +1185,13 @@ std::wstring GameEngineIni() {
     return std::wstring(buf) + L"\\detnoir\\Saved\\Config\\Windows\\Engine.ini";
 }
 
-// Writes <name>=0 to the game's Engine.ini [SystemSettings] (read at the next launch), once.
-void WriteStartupOff(const wchar_t* name) {
-    static std::mutex m;
-    static std::vector<std::wstring> done;
-    std::lock_guard<std::mutex> lock(m);
-    for (const std::wstring& d : done)
-        if (d == name) return;
-    done.push_back(name);
+// Writes <name>=0 to the game's Engine.ini [SystemSettings] (read at the next launch). UE keeps its
+// own copy of Engine.ini and writes it back at exit, dropping lines added while it ran (seen
+// 2026-11-01), so the wanted lines are written again when the add-on unloads (RewriteStartupOffs).
+std::mutex g_startupMutex;
+std::vector<std::wstring> g_startupOff;  // names wanted at 0
+
+void WriteStartupOffNow(const wchar_t* name) {
     const std::wstring ini = GameEngineIni();
     if (ini.empty()) return;
     wchar_t value[16] = {};
@@ -1202,6 +1201,19 @@ void WriteStartupOff(const wchar_t* name) {
         Log("%ls=0 written to %ls (from the next launch)", name, ini.c_str());
     else
         Log("couldn't write %ls to %ls (error %lu)", name, ini.c_str(), GetLastError());
+}
+
+void WriteStartupOff(const wchar_t* name) {
+    std::lock_guard<std::mutex> lock(g_startupMutex);
+    for (const std::wstring& d : g_startupOff)
+        if (d == name) return;
+    g_startupOff.push_back(name);
+    WriteStartupOffNow(name);
+}
+
+void RewriteStartupOffs() {
+    std::lock_guard<std::mutex> lock(g_startupMutex);
+    for (const std::wstring& d : g_startupOff) WriteStartupOffNow(d.c_str());
 }
 
 // This session's value of a start-up variable (<fallback> if it can't be read), logged once.
