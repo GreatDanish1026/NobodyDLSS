@@ -864,6 +864,11 @@ void OnInitDevice(device* dev) {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
     if (g_factoryHooked || !g_set.enabled) return;
     std::string err;
+    if (GameFiSwapchainOn()) {
+        g_status = kGameFiRestart;
+        Log("frame generation: %s", kGameFiRestart);
+        return;
+    }
     if (!HookFactory(err)) {
         g_status = err;
         Log("frame generation: %s", err.c_str());
@@ -1350,6 +1355,7 @@ void RegisterFrameGen() {
     g_set.enabled = g_set.mode != kOff && kTsrMapped;  // needs the upscaler, which needs TSR mapped
     if (g_set.enabled) Log("frame generation: %s, %s", kTechNames[g_activeTech], kModeNames[EffectiveMode(g_set.mode)]);
     if (g_set.enabled && g_set.tech == kTechDlss) TurnGameNgxOff();
+    if (g_set.enabled) TurnGameFiSwapchainOff();
     reshade::register_event<reshade::addon_event::init_device>(&OnInitDevice);
     reshade::register_event<reshade::addon_event::destroy_device>(&OnDestroyDevice);
     reshade::register_event<reshade::addon_event::init_swapchain>(&OnInitSwapchain);
@@ -1394,6 +1400,7 @@ void DrawFrameGenSettings() {
         else g_set.mode = kOff;
         g_set.enabled = g_set.mode != kOff;
         if (g_set.enabled && g_set.tech == kTechDlss) TurnGameNgxOff();
+        if (g_set.enabled) TurnGameFiSwapchainOff();
         reshade::set_config_value(nullptr, RD_PRODUCT, "FrameGenMode", g_set.mode);
         reshade::set_config_value(nullptr, RD_PRODUCT, "FrameGenTech", g_set.tech);
         Log("settings: frame generation %s", kChoices[choice]);

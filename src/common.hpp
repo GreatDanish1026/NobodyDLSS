@@ -51,6 +51,11 @@ constexpr uint32_t kTsrResolveHistory = 0xfffffff8;       // none in UE 5.3 (pla
 bool GameNgxRunning();
 void TurnGameNgxOff();
 extern const char* const kGameNgxRestart;  // the message shown while it's running
+// The same for the game's FSR 3 frame interpolation swapchain (r.FidelityFX.FI.OverrideSwapChainDX12),
+// which our frame generation can't sit next to.
+bool GameFiSwapchainOn();
+void TurnGameFiSwapchainOff();
+extern const char* const kGameFiRestart;
 
 // upscaler.cpp
 void RegisterUpscaler();

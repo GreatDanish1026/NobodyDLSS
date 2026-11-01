@@ -1185,40 +1185,70 @@ std::wstring GameEngineIni() {
     return std::wstring(buf) + L"\\detnoir\\Saved\\Config\\Windows\\Engine.ini";
 }
 
-void TurnGameNgxOff() {
-    static bool done = false;
-    if (done) return;
-    done = true;
+// Writes <name>=0 to the game's Engine.ini [SystemSettings] (read at the next launch), once.
+void WriteStartupOff(const wchar_t* name) {
+    static std::mutex m;
+    static std::vector<std::wstring> done;
+    std::lock_guard<std::mutex> lock(m);
+    for (const std::wstring& d : done)
+        if (d == name) return;
+    done.push_back(name);
     const std::wstring ini = GameEngineIni();
     if (ini.empty()) return;
     wchar_t value[16] = {};
-    GetPrivateProfileStringW(L"SystemSettings", L"r.NGX.Enable", L"", value, 16, ini.c_str());
+    GetPrivateProfileStringW(L"SystemSettings", name, L"", value, 16, ini.c_str());
     if (wcscmp(value, L"0") == 0) return;
-    if (WritePrivateProfileStringW(L"SystemSettings", L"r.NGX.Enable", L"0", ini.c_str()))
-        Log("the game's NGX: r.NGX.Enable=0 written to %ls (from the next launch)", ini.c_str());
+    if (WritePrivateProfileStringW(L"SystemSettings", name, L"0", ini.c_str()))
+        Log("%ls=0 written to %ls (from the next launch)", name, ini.c_str());
     else
-        Log("the game's NGX: couldn't write %ls (error %lu)", ini.c_str(), GetLastError());
+        Log("couldn't write %ls to %ls (error %lu)", name, ini.c_str(), GetLastError());
 }
 
-bool GameNgxRunning() {
+// This session's value of a start-up variable (<fallback> if it can't be read), logged once.
+int StartupValue(const wchar_t* name, int fallback) {
     static std::mutex m;
-    static int state = -1;  // -1 not read yet, 0 off, 1 running
+    static std::map<std::wstring, int> values;
     std::lock_guard<std::mutex> lock(m);
-    if (state >= 0) return state == 1;
+    auto it = values.find(name);
+    if (it != values.end()) return it->second;
     const uint8_t* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
     void** singleton = cvars::FindConsoleManagerSingleton(base);
     void* manager = nullptr;
     if (singleton) cvars::SafeCopy(&manager, singleton, 8);
-    int32_t v = 1;
-    void* var = manager && cvars::IsConsoleManager(base, manager) ? cvars::FindVariable(manager, L"r.NGX.Enable") : nullptr;
+    int32_t v = fallback;
+    void* var = manager && cvars::IsConsoleManager(base, manager) ? cvars::FindVariable(manager, name) : nullptr;
     if (!var || !cvars::GetInt(var, v)) {
-        Log("the game's NGX: r.NGX.Enable not readable, assumed off");
-        v = 0;
+        Log("%ls not readable: taken as %d", name, fallback);
+        v = fallback;
+    } else {
+        Log("this session: %ls = %d", name, v);
     }
-    state = v != 0;
-    Log("the game's NGX: r.NGX.Enable = %d%s", v, state ? " (running: DLSS and DLSS frame generation wait for a restart)" : "");
-    if (state) TurnGameNgxOff();
-    return state == 1;
+    values[name] = v;
+    return v;
+}
+
+void TurnGameNgxOff() { WriteStartupOff(L"r.NGX.Enable"); }
+
+bool GameNgxRunning() {
+    if (StartupValue(L"r.NGX.Enable", 0) == 0) return false;
+    TurnGameNgxOff();
+    return true;
+}
+
+// The game's FSR 3 plugin wraps the swapchain in its own frame interpolation swapchain while
+// r.FidelityFX.FI.OverrideSwapChainDX12=1 (the game's default), even with its frame generation off.
+// Our frame generation (Streamline's or AMD's) replaces the swapchain too; one replacement at a
+// time, so it's turned off for ours (the game's own FSR frame generation option is given up).
+const char* const kGameFiRestart =
+    "restart the game once: its own FSR 3 plugin had replaced the swapchain, which frame generation can't share "
+    "(turned off in the game's Engine.ini for the next launch)";
+
+void TurnGameFiSwapchainOff() { WriteStartupOff(L"r.FidelityFX.FI.OverrideSwapChainDX12"); }
+
+bool GameFiSwapchainOn() {
+    if (StartupValue(L"r.FidelityFX.FI.OverrideSwapChainDX12", 0) == 0) return false;
+    TurnGameFiSwapchainOff();
+    return true;
 }
 
 namespace {
@@ -1371,7 +1401,7 @@ void LogStats() {
     if (++presents % 120 != 0) return;
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
     const std::string fg = FrameGenDiag();  // also resets frame generation's counters
-    bool problem = !g_why.empty() || fg.find("untagged 0,") == std::string::npos;
+    bool problem = !g_why.empty() || (!fg.empty() && fg.find("untagged 0,") == std::string::npos);
     for (const auto& [key, v] : g_stats) problem |= v.noOutput || v.noDepth || v.noMotion || v.noColor || v.other;
     if (!g_set.enabled || g_statLines >= 30 || !problem) {
         g_stats.clear(), g_why.clear();
