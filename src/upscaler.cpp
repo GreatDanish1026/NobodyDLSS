@@ -382,6 +382,10 @@ struct OwnTexture {
     resource tex = {0};
 };
 std::vector<OwnTexture> g_own;
+// The game's device: every resource, pipeline and DLSS/FSR context of ours lives on it. Other
+// devices come and go (the game's video decoder makes its own; destroying it at the end of a
+// video crashed 0.1.1 here, 2026-11-01) and are left alone.
+device* g_device = nullptr;
 
 // Our depth (state kDepthRead) or output (state unordered_access) texture like <like>.
 resource Own(device* dev, resource like, bool depth) {
@@ -775,6 +779,7 @@ void OnDestroyResource(device* dev, resource r) {
 }
 
 void OnDilateVelocity(command_list* cl, ListState& s) {
+    g_device = cl->get_device();
     const resource depth = Bound(cl, s.compute, 0, 0);
     const resource velocity = Bound(cl, s.compute, 0, 1);
     const resource out = Bound(cl, s.compute, 1, 0);
@@ -1137,6 +1142,8 @@ bool OnDispatch(command_list* cl, uint32_t x, uint32_t y, uint32_t z) {
 
 void OnDestroyDevice(device* dev) {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    if (dev != g_device) return;  // not the game's device (or nothing of ours on it)
+    g_device = nullptr;
     dlss::Shutdown();
     fsr::Shutdown();
     g_lastBackend = 0, g_autoBackend = 0;
@@ -1157,6 +1164,64 @@ void OnDestroyDevice(device* dev) {
 }
 
 bool g_keyWasDown = false;
+
+}  // namespace
+
+// ---------------------------------------------------------------- the game's own NGX
+//
+// The game's DLSS plugin loads NGX at launch unless r.NGX.Enable=0 (a read-only variable, set from
+// Engine.ini [SystemSettings] before ReShade loads). With it running, NGX failed for our DLSS
+// (NvAPI_D3D12_LaunchCuKernelChain, then an access violation in CreateFeature; 2026-11-01); with
+// it off DLSS ran. Our DLSS replaces the game's, so its own DLSS menu option is given up.
+
+const char* const kGameNgxRestart =
+    "restart the game once: its own DLSS plugin had NVIDIA's NGX running, which NobodyDLSS's DLSS can't share "
+    "(turned off in the game's Engine.ini for the next launch)";
+
+std::wstring GameEngineIni() {
+    wchar_t buf[MAX_PATH] = {};
+    const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+    if (!n || n >= MAX_PATH) return std::wstring();
+    return std::wstring(buf) + L"\\detnoir\\Saved\\Config\\Windows\\Engine.ini";
+}
+
+void TurnGameNgxOff() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    const std::wstring ini = GameEngineIni();
+    if (ini.empty()) return;
+    wchar_t value[16] = {};
+    GetPrivateProfileStringW(L"SystemSettings", L"r.NGX.Enable", L"", value, 16, ini.c_str());
+    if (wcscmp(value, L"0") == 0) return;
+    if (WritePrivateProfileStringW(L"SystemSettings", L"r.NGX.Enable", L"0", ini.c_str()))
+        Log("the game's NGX: r.NGX.Enable=0 written to %ls (from the next launch)", ini.c_str());
+    else
+        Log("the game's NGX: couldn't write %ls (error %lu)", ini.c_str(), GetLastError());
+}
+
+bool GameNgxRunning() {
+    static std::mutex m;
+    static int state = -1;  // -1 not read yet, 0 off, 1 running
+    std::lock_guard<std::mutex> lock(m);
+    if (state >= 0) return state == 1;
+    const uint8_t* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+    void** singleton = cvars::FindConsoleManagerSingleton(base);
+    void* manager = nullptr;
+    if (singleton) cvars::SafeCopy(&manager, singleton, 8);
+    int32_t v = 1;
+    void* var = manager && cvars::IsConsoleManager(base, manager) ? cvars::FindVariable(manager, L"r.NGX.Enable") : nullptr;
+    if (!var || !cvars::GetInt(var, v)) {
+        Log("the game's NGX: r.NGX.Enable not readable, assumed off");
+        v = 0;
+    }
+    state = v != 0;
+    Log("the game's NGX: r.NGX.Enable = %d%s", v, state ? " (running: DLSS and DLSS frame generation wait for a restart)" : "");
+    if (state) TurnGameNgxOff();
+    return state == 1;
+}
+
+namespace {
 
 // ---------------------------------------------------------------- render resolution (DLSS mode)
 //
@@ -1356,6 +1421,7 @@ void RestoreListState(command_list* cl) {
 
 void RegisterUpscaler() {
     LoadSettings();
+    if (g_set.enabled) TurnGameNgxOff();
     reshade::register_event<reshade::addon_event::init_command_list>(&OnInitList);
     reshade::register_event<reshade::addon_event::destroy_command_list>(&OnDestroyList);
     reshade::register_event<reshade::addon_event::reset_command_list>(&OnResetList);
@@ -1386,6 +1452,7 @@ void UnregisterUpscaler() {
 
 void SaveAndLog() {
     g_resetAll = true;
+    if (g_set.enabled) TurnGameNgxOff();
     SaveSettings();
     Log("settings: upscaler %s (%s), DLSS preset %d, FSR sharpness %.2f, mode %s", g_set.enabled ? "on" : "off",
         kBackendNames[g_set.backend], g_set.preset, g_set.sharpness,

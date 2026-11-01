@@ -138,6 +138,10 @@ bool Init(ID3D12Device* device, std::string& error) {
         error = g_initError;
         return g_ready;
     }
+    if (rd::GameNgxRunning()) {  // not counted as tried: ours can start after a restart only
+        error = rd::kGameNgxRestart;
+        return false;
+    }
     g_initTried = true;
     g_device = device;
 

@@ -236,6 +236,9 @@ swapchain* g_rsSwapchain = nullptr;  // ReShade's view of the game's swapchain (
 resource g_hudlessTex = {0};
 resource g_uiReadback = {0};  // one row of the HUD layer, for its check
 device* g_hudlessDevice = nullptr;
+// The game's device (its swapchain's). Other devices (the video decoder's) are destroyed during
+// play; frame generation only shuts down with this one.
+void* g_gameDevice = nullptr;
 std::atomic<uint64_t> g_hudlessCount{0};
 
 // The HUD mask: ui_alpha.hlsl writes the layer's alpha (flipped if inverted) to an r8 texture.
@@ -765,6 +768,10 @@ void Feature(sl::Feature f, T*& fn, const char* name) {
 }
 
 bool InitStreamline(ID3D12Device* device, std::string& error) {
+    if (GameNgxRunning()) {
+        error = kGameNgxRestart;
+        return false;
+    }
     static std::wstring dir;
     dir = ExeDir() + L"streamline\\";
     const std::wstring interposer = dir + L"sl.interposer.dll";
@@ -870,6 +877,8 @@ void OnInitDevice(device* dev) {
 void OnDestroyDevice(device* dev) {
     if (dev->get_api() != device_api::d3d12) return;
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    if (reinterpret_cast<void*>(dev->get_native()) != g_gameDevice) return;
+    g_gameDevice = nullptr;
     if (g_hudlessTex.handle && g_hudlessDevice == dev) dev->destroy_resource(g_hudlessTex), g_hudlessTex = {0};
     if (g_uiReadback.handle && g_hudlessDevice == dev) dev->destroy_resource(g_uiReadback), g_uiReadback = {0};
     if (g_hudlessDevice == dev) DestroyMask(dev);
@@ -1189,6 +1198,7 @@ void OnInitSwapchain(swapchain* sc, bool) {
     }
     g_bbWidth = d.texture.width, g_bbHeight = d.texture.height, g_bbFormat = d.texture.format;
     g_rsSwapchain = sc;
+    g_gameDevice = reinterpret_cast<void*>(sc->get_device()->get_native());
 }
 
 void OnDestroySwapchain(swapchain* sc, bool) {
@@ -1339,6 +1349,7 @@ void RegisterFrameGen() {
     g_activeTech = g_set.tech;  // until the next launch
     g_set.enabled = g_set.mode != kOff && kTsrMapped;  // needs the upscaler, which needs TSR mapped
     if (g_set.enabled) Log("frame generation: %s, %s", kTechNames[g_activeTech], kModeNames[EffectiveMode(g_set.mode)]);
+    if (g_set.enabled && g_set.tech == kTechDlss) TurnGameNgxOff();
     reshade::register_event<reshade::addon_event::init_device>(&OnInitDevice);
     reshade::register_event<reshade::addon_event::destroy_device>(&OnDestroyDevice);
     reshade::register_event<reshade::addon_event::init_swapchain>(&OnInitSwapchain);
@@ -1382,6 +1393,7 @@ void DrawFrameGenSettings() {
         else if (choice > 0) g_set.tech = kTechDlss, g_set.mode = choice;
         else g_set.mode = kOff;
         g_set.enabled = g_set.mode != kOff;
+        if (g_set.enabled && g_set.tech == kTechDlss) TurnGameNgxOff();
         reshade::set_config_value(nullptr, RD_PRODUCT, "FrameGenMode", g_set.mode);
         reshade::set_config_value(nullptr, RD_PRODUCT, "FrameGenTech", g_set.tech);
         Log("settings: frame generation %s", kChoices[choice]);

@@ -44,6 +44,14 @@ constexpr uint32_t kTsrFilterAntiAliasing = 0x1c0a8a60;
 constexpr uint32_t kTsrUpdateHistory = 0xfa4cc3c5;        // t0 scene colour, t1 translucency, t3 link -> u0 output
 constexpr uint32_t kTsrResolveHistory = 0xfffffff8;       // none in UE 5.3 (placeholder, never matches)
 
+// The game's own DLSS plugin starts NVIDIA's NGX at launch (r.NGX.Enable=1). A second NGX user in the
+// process (our DLSS, Streamline's frame generation) then crashed inside NGX (2026-11-01).
+// GameNgxRunning: r.NGX.Enable is on this session (DLSS and Streamline aren't started then).
+// TurnGameNgxOff: writes r.NGX.Enable=0 to the game's Engine.ini (read at the next launch).
+bool GameNgxRunning();
+void TurnGameNgxOff();
+extern const char* const kGameNgxRestart;  // the message shown while it's running
+
 // upscaler.cpp
 void RegisterUpscaler();
 void UnregisterUpscaler();
