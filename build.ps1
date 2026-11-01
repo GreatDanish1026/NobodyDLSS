@@ -42,7 +42,7 @@ $cmd = @(
      "/I `"$obj`" /I `"$root\third_party\imgui`" /I`"$root\third_party\reshade\include`" /I `"$root\third_party\dlss\include`" /I `"$root\third_party\streamline\include`" " +
      "/I `"$root\third_party\fidelityfx\api\include`" /I `"$root\third_party\fidelityfx\upscalers\include`" /I `"$root\third_party\fidelityfx\framegeneration\include`" " +
      "/Fo`"$obj\\`" `"$root\src\main.cpp`" `"$root\third_party\reshade\utils\descriptor_tracking.cpp`" `"$root\src\upscaler.cpp`" `"$root\src\dlss.cpp`" `"$root\src\fsr.cpp`" `"$root\src\fsrfg.cpp`" `"$root\src\framegen.cpp`" user32.lib advapi32.lib ole32.lib d3d12.lib dxgi.lib `"$root\third_party\dlss\lib\nvsdk_ngx_s.lib`" " +
-     "/link /DLL /OUT:`"$addon`" /PDB:`"$obj\NobodyDLSS.pdb`" /DEBUG")
+     "/link /DLL /OUT:`"$addon`" /PDB:`"$obj\NobodyDLSS.pdb`" /MAP:`"$obj\NobodyDLSS.map`" /DEBUG")
 ) -join " && "
 cmd /c $cmd
 if ($LASTEXITCODE) { throw "build failed" }

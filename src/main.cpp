@@ -161,9 +161,43 @@ const char* FormatName(format f) {
     }
 }
 
+// A descriptor slot can still name a resource UE has freed (UE 5.3 reuses its descriptor cache
+// slots; 0.0.1 crashed reading one): the lookup is guarded so a capture never takes the game down.
+bool SafeResourceDesc(device* dev, resource r, resource_desc* out) {
+    __try {
+        *out = dev->get_resource_desc(r);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool SafeResourceFromView(device* dev, resource_view v, resource* out) {
+    __try {
+        *out = dev->get_resource_from_view(v);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Copies <size> bytes (a multiple of 4) of a mappable buffer to <out>; false if it can't be read.
+bool SafeReadBuffer(device* dev, const buffer_range& b, uint64_t size, uint32_t* out) {
+    __try {
+        void* data = nullptr;
+        if (!dev->map_buffer_region(b.buffer, b.offset, size, map_access::read_only, &data) || !data) return false;
+        memcpy(out, data, static_cast<size_t>(size / 4) * 4);
+        dev->unmap_buffer_region(b.buffer);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 std::string Describe(device* dev, resource r) {
     if (!r.handle) return "null";
-    resource_desc d = dev->get_resource_desc(r);
+    resource_desc d;
+    if (!SafeResourceDesc(dev, r, &d)) return Format("#%05llx stale", (r.handle >> 4) & 0xfffff);
     std::string id = Format("#%05llx", (r.handle >> 4) & 0xfffff);  // short, enough to follow one resource
     if (d.type == resource_type::buffer) return id + Format(" buf %llu", d.buffer.size);
     const char* fn = FormatName(d.texture.format);
@@ -339,7 +373,11 @@ bool OnExecuteIndirect(command_list* cl, indirect_command type, resource, uint64
 // float) to the list log. TSR passes only; the View uniform buffer is large, so up to 8 KB.
 void DumpConstants(command_list* cl, uint32_t param, const buffer_range& b, bool tsr) {
     device* dev = cl->get_device();
-    const resource_desc d = dev->get_resource_desc(b.buffer);
+    resource_desc d;
+    if (!SafeResourceDesc(dev, b.buffer, &d)) {
+        Add(cl, Format("constants param %u: stale buffer", param));
+        return;
+    }
     if (d.type != resource_type::buffer || b.offset >= d.buffer.size) return;
     {
         const std::string key = Format("%llx+%llu", b.buffer.handle, b.offset);
@@ -357,14 +395,11 @@ void DumpConstants(command_list* cl, uint32_t param, const buffer_range& b, bool
     // camera matrices) is larger. Unknown passes: the first 1 KB, except large buffers (the View).
     const uint64_t limit = tsr || size > 4096 ? 16384 : 1024;
     if (size > limit) size = limit;
-    void* data = nullptr;
-    if (!dev->map_buffer_region(b.buffer, b.offset, size, map_access::read_only, &data) || !data) {
+    std::vector<uint32_t> v(static_cast<size_t>(size / 4));
+    if (!SafeReadBuffer(dev, b, size, v.data())) {
         Add(cl, Format("constants param %u: can't read (heap %u)", param, static_cast<uint32_t>(d.heap)));
         return;
     }
-    std::vector<uint32_t> v(static_cast<size_t>(size / 4));
-    memcpy(v.data(), data, v.size() * 4);
-    dev->unmap_buffer_region(b.buffer);
     Add(cl, Format("constants param %u: %zu bytes", param, v.size() * 4));
     for (size_t i = 0; i < v.size(); i += 4) {
         std::string line = Format("  c %4zu:", i * 4);
