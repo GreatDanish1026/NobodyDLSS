@@ -68,6 +68,18 @@ carries over.
   FindOrCreateDynamicTextureResource` via the FSR 3 plugin's Slate renderer, around NobodyTweaks'
   HDR switch: same signature as NobodyTweaks 0.3.2's crash, not this add-on.
 
+## Frame generation (2026-11-01)
+
+- The game's FSR 3 plugin wraps the swapchain while `r.FidelityFX.FI.OverrideSwapChainDX12=1`
+  (its default). 0.2.0 writes it as 0 to Engine.ini when frame generation is picked and doesn't
+  hook the swapchain while it's 1. UE rewrote Engine.ini at exit and dropped the line; 0.2.1
+  writes its lines again at unload (and they stayed).
+- The three early device creations at launch read it as 1 (Engine.ini's [SystemSettings] isn't
+  applied yet); the game's real device reads 0.
+- 0.2.1 in game (user, 2026-11-01): **DLSS Frame Generation 2x works**. Streamline 2.14 on the
+  game's swapchain, View buffer check passed (near 1.0), first frame tagged at submission
+  (kTagAtRecord=false works for 5.3), clean Streamline shutdown at exit, no crash.
+
 ## To find out
 
 - ClipToPrevClip offset (searched at run time; logged).

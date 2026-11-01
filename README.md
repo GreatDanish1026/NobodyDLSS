@@ -1,11 +1,10 @@
-# NobodyDLSS 1.2.1
+# NobodyDLSS 0.2.1
 
-ReShade add-on for **Life is Strange: Double Exposure** (Unreal Engine 5.2, DirectX 12) that
-replaces the game's TSR upscaler with **NVIDIA DLSS** or **AMD FSR**, and adds **DLSS Frame
-Generation** or **FSR Frame Generation**. The game has none of these (its menu's FSR switch does
-nothing). It's separate from
-[NobodyTweaks](https://github.com/GreatDanish1026/NobodyTweaks) (graphics
-settings), and the two can be installed side by side.
+ReShade add-on for **Nobody Wants to Die** (Unreal Engine 5.3, DirectX 12) that replaces the
+game's TSR upscaler with **NVIDIA DLSS** or **AMD FSR**, and adds **DLSS Frame Generation** or
+**FSR Frame Generation**. The game's own DLSS only offers models A-G and has no frame generation;
+its FSR frame generation only works with FSR upscaling. It's separate from NobodyTweaks (graphics
+settings, hardware ray tracing, HDR), and the two can be installed side by side.
 
 | | Graphics card |
 |---|---|
@@ -20,51 +19,53 @@ upscaling with FSR Frame Generation on an RTX 30 card).
 ## What it does
 
 - **Upscaler** (F9 to switch on and off): Auto (DLSS on NVIDIA RTX, FSR elsewhere), DLSS or FSR in
-  place of TSR. DLSS Super Resolution 310.9.16; FSR through AMD's FSR SDK 2.4.0, which picks FSR 4
-  or FSR 3.1 for the card. Motion vectors are computed by the add-on from the depth buffer and the
-  camera, plus the engine's own motion of moving objects (characters, foliage in the wind, cloth).
-  The game draws its translucent effects (particles, light beams, light shafts, outlines) on a
-  separate layer that its own upscaler blends in; the add-on blends that layer in first, and
-  "Translucent effects" (Advanced, kept per upscaler) keeps them from smearing.
-- **Render resolution**: Native/DLAA, Quality, Balanced, Performance or Ultra Performance set the
-  render resolution while the upscaler is on; "Game's Resolution Scale" leaves it to the game's
-  menu. Keep the game's Secondary Resolution Scale at 100%.
+  place of TSR. DLSS Super Resolution 310.9.16; FSR through AMD's FSR SDK 2.4.0. Motion vectors
+  are computed by the add-on from the depth buffer and the camera, plus the engine's own motion
+  of moving objects. The game's separate translucency layer (particles, light beams, fog) is
+  blended in before upscaling.
+- **Render resolution**: Native/DLAA, Quality, Balanced, Performance or Ultra Performance; "Game's
+  Resolution Scale" leaves it to the game's menu.
 - **DLSS model**: K (transformer, default), J, L, M or NVIDIA's default. **FSR sharpness**: 0-1.
 - **Frame generation**: Off, DLSS 2x / 3x / 4x / Dynamic (NVIDIA Streamline 2.14.16, with Reflex),
-  or FSR 2x (AMD's frame generation swapchain; no Reflex, so a little more latency). It runs in
-  game, not in menus (the menus don't use the game's upscaler). In HDR the HUD and subtitles are
-  kept from warping with the picture the game draws before its HUD. Switching it on, or between
-  DLSS and FSR, takes a game restart; DLSS's multipliers switch right away.
+  or FSR 2x. Switching it on, or between DLSS and FSR, takes a game restart.
 
-The overlay (ReShade's Add-ons tab) shows a one-line summary of the upscaler and frame generation
-at the top, with **Settings**, **Status** and **Advanced** (testing tools, FSR debug view, frame
-capture) tabs. Settings are saved in `ReShade.ini` under `[NobodyDLSS]`.
+**Keep the game's upscaling menu on TSR**: the add-on replaces TSR's output.
+
+**What it changes in the game's settings.** The game's own DLSS plugin starts NVIDIA's NGX at
+launch, and NGX can't be shared with the add-on's DLSS (it crashed); the game's FSR 3 plugin
+replaces the swapchain, which frame generation can't share. So when DLSS or frame generation is
+switched on, the add-on adds these lines to
+`%LOCALAPPDATA%\detnoir\Saved\Config\Windows\Engine.ini` (read at the next launch, hence one
+restart):
+
+```
+[SystemSettings]
+r.NGX.Enable=0
+r.FidelityFX.FI.OverrideSwapChainDX12=0
+```
+
+The game's own DLSS and FSR frame generation menu options then do nothing; delete the lines to
+get them back.
+
+The overlay (ReShade's Add-ons tab) shows a one-line summary at the top, with **Settings**,
+**Status** and **Advanced** tabs. Settings are saved in `ReShade.ini` under `[NobodyDLSS]`.
 
 ## Install
 
-1. Install ReShade 6.8 or later with full add-on support for `Chronos-Win64-Shipping.exe`, in
-   `LifeIsStrangeDoubleExposure\Chronos\Binaries\Win64`.
+1. Install ReShade 6.8 or later with full add-on support for `detnoir-Win64-Shipping.exe`, in
+   `Nobody Wants to Die\detnoir\Binaries\Win64`.
 2. Copy everything from the release zip into that `Win64` folder: `NobodyDLSS.addon64`,
-   `nvngx_dlss.dll`, the three `amd_fidelityfx_*_dx12.dll` files and the `streamline` folder (the
-   licence files can go along).
-3. Start the game, open ReShade (Home key), Add-ons tab, NobodyDLSS: switch the upscaler on
-   (or press F9), pick DLSS or FSR and a render resolution and, if you like, frame generation
-   (takes effect after a restart).
-4. In the NVIDIA App, a DLSS model override for the game takes precedence over DLSS model.
+   `nvngx_dlss.dll`, the three `amd_fidelityfx_*_dx12.dll` files and the `streamline` folder.
+3. Choose TSR in the game's upscaling menu. Open ReShade (Home key), Add-ons tab, NobodyDLSS:
+   switch the upscaler on (or press F9), pick a render resolution and, if you like, frame
+   generation. Restart the game once.
 
-The zip includes NVIDIA's DLSS 310.9.16 and Streamline 2.14.16 runtime files, signed by NVIDIA
-(the add-on checks Streamline's signature before loading it), and AMD's FSR SDK 2.4.0 runtime
-files, signed by AMD. Their licences are in `licenses`, and attribution is in
-`THIRD_PARTY_NOTICES.txt`.
+Tested with Steam build 14922697 at 3840x2160 with HDR (through NobodyTweaks) on an NVIDIA RTX
+card: DLSS upscaling and DLSS Frame Generation 2x. FSR upscaling and FSR Frame Generation come
+from DoubleExposureDLSS and haven't been tested in this game yet.
 
-Tested with Steam build 16505703 at 3840x2160 with HDR on, on an NVIDIA RTX card (DLSS, FSR 3.1
-upscaling, both frame generations). FSR 4 on Radeon cards goes through the same code but hasn't
-been tested on one. Play at your screen's resolution: a higher one left in GameUserSettings.ini
-makes the game render an extra view that frame generation can't keep up with. With HDR off, frame
-generation runs without the HUD protection (the game then draws its HUD straight onto the screen).
-
-To uninstall, delete those files. Logs: `NobodyDLSS.log` next to the game's exe,
-Streamline's in `streamline\sl.log`.
+To uninstall, delete those files (and the Engine.ini lines). Logs: `NobodyDLSS.log` next to the
+game's exe, Streamline's in `streamline\sl.log`.
 
 ## Build
 
@@ -78,11 +79,9 @@ repository: unzip `bin\x64` of NVIDIA's Streamline 2.14.16 release into
 
 ## How it works
 
-Built from ReunionDLSS (Life is Strange: Reunion, UE 5.6). `docs/FINDINGS.md` has what differs in
-UE 5.2: TSR's nine passes and their shader ids, the chain linked at DecimateHistory, the
-square-root encoding of object velocity, the View uniform buffer offsets, and frame generation's
-inputs handed over when the game submits each frame. `docs/FSR.md` covers FSR: the upscaler next to
-DLSS, why FSR's mask leaves translucency out, and FSR Frame Generation's swapchain, per-frame
-configure and prepare, and shutdown order. The F10 frame capture (Advanced tab) writes two frames
-of GPU commands to `NobodyDLSS-frame-N.txt`, for finding TSR's passes again after a game
-update.
+Ported from DoubleExposureDLSS (UE 5.2). `docs/FINDINGS.md` has what differs in UE 5.3: TSR's
+passes split over the async compute and graphics queues, no ResolveHistory (UpdateHistory writes
+the output), the chain linked across queues, the View uniform buffer offsets (UE 5.6's), and the
+game's own NGX and FSR 3 swapchain. `docs/FSR.md` covers FSR. The F10 frame capture (Advanced tab)
+writes two frames of GPU commands to `NobodyDLSS-frame-N.txt`, for finding TSR's passes again
+after a game update.
