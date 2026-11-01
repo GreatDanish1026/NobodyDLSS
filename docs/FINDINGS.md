@@ -16,13 +16,45 @@ Nobody Wants to Die (UE 5.3, build 14922697); DoubleExposureDLSS's findings are 
 - Mapping build: TSR shader ids are placeholders and `kTsrMapped=false` keeps DLSS and frame
   generation off. F10 writes every compute pass of two frames to `NobodyDLSS-frame-N.txt`.
 
+## 0.0.1 crash and 0.0.2 (2026-11-01)
+
+0.0.1's capture crashed the game on the RHI thread: a descriptor slot still named a resource UE
+had freed, and get_resource_desc read freed memory (AV at 0xffffffffffffffff). 0.0.2 guards the
+capture's resource and buffer reads with SEH. build.ps1 writes `bin\obj\NobodyDLSS.map` (the
+system dbghelp can't read the PDB): look crash RVAs up there.
+
+## UE 5.3 TSR (capture 2026-11-01, TSR 67% at 3840x2160: render 2560x1440)
+
+| pass | id | queue | bindings |
+|---|---|---|---|
+| ClearPrevTextures | 42e09aac (same as 5.2) | async compute | u0-u2 r32uint |
+| (ForwardScatterDepth?) | 52618d50 | async compute | t0 r32uint -> u0 r32uint |
+| DilateVelocity | 87b9be71 | async compute | t0 depth r32g8x24, t1 velocity rgba16unorm -> u0 rg16unorm, u1 r16f, ... |
+| DecimateHistory | 090c206f | async compute | t0 = DilateVelocity u0; u0 rgb10a2, u1 rgba8, u2 rg16unorm, u3 rg8, u4 r8 |
+| RejectShading | 161118cb | graphics | t0 scene colour rgba16f, t2 translucency rgba16f, t3-t5 Decimate outputs |
+| SpatialAntiAliasing | 93b776bc | graphics | |
+| FilterAntiAliasing | 1c0a8a60 | graphics | t0 r8uint -> u0 r8uint |
+| UpdateHistory | fa4cc3c5 | graphics | t0 scene colour, t1 translucency, t3 = Decimate u2, t8 previous history -> u0 output 3840x2160 r11g11b10f, u1 1920x1080 half-res, u2 r8unorm |
+
+No ResolveHistory: the history is at 100% and UpdateHistory's u0 is the output (two textures
+alternate). UpdateHistory's param 2 has 5.2 ResolveHistory's layout: extent 0, min 32, size 48,
+jitter 256, motion vector scale 272. The View UB is DilateVelocity's param 3.
+
+View UB offsets are UE 5.6's, not 5.2's: TranslatedWorldToClip 0, RelativeWorldToClip 64,
+ClipToRelativeWorld 128, TranslatedWorldToView 192, ViewToTranslatedWorld 256, ViewToClip 448
+(jittered; [2][2]=0 infinite far, near 1), ViewToClipNoAA 512, ClipToView 576.
+
+0.1.0: DLSS runs at UpdateHistory (the game's pass first, then DLSS overwrites u0). The chain
+crosses queues: DilateVelocity's link is passed on under DecimateHistory's u2 and found at
+UpdateHistory's t3. Translucency is still blended by TSR (UpdateHistory t1), so compose.hlsl
+carries over.
+
 ## To find out
 
-- UE 5.3 TSR passes and their shader ids (capture with TSR chosen in the game's menu).
-- View uniform buffer offsets (5.2: TranslatedWorldToClip 0, RelativeWorldToClip 128,
-  ViewToTranslatedWorld 320, ViewToClip 512, ViewToClipNoAA 576) and ClipToPrevClip.
-- Velocity encoding (5.2: square-root "gamma" decode; 5.6: linear).
-- Whether separate translucency is still blended by TSR (5.2: UpdateHistory t1).
+- ClipToPrevClip offset (searched at run time; logged).
+- Velocity encoding (5.2: square-root "gamma" decode, the default; 5.6: linear).
 - Whether 5.3 submits on its own thread (`kTagAtRecord`).
 - Streamline's interposer next to the game's FSR 3 frame interpolation swap chain
   (`r.FidelityFX.FI.OverrideSwapChainDX12=1`).
+- NobodyTweaks' FSR 3 frame generation option is to be removed once DLSS frame generation works
+  here (user, 2026-11-01); NobodyDLSS keeps its own FSR frame generation.
