@@ -80,6 +80,15 @@ carries over.
   game's swapchain, View buffer check passed (near 1.0), first frame tagged at submission
   (kTagAtRecord=false works for 5.3), clean Streamline shutdown at exit, no crash.
 
+## FSR (2026-11-01, 0.2.1)
+
+User tested FSR upscaling and FSR frame generation; log clean: FSR 3.1.6 upscaler 2228x1253 ->
+3840x2160 (camera near 1.0, vertical FOV 58.7 degrees from ViewToClip at 448), FSR FG 3.1.6 2x in
+HDR on the game's swapchain (r.FidelityFX.FI.OverrideSwapChainDX12=0), all frames tagged, HUD
+told apart with the HUD-mask composite (and the pre-HUD picture in some scenes), ordered shutdown
+(context released, then the swapchain), no crash. Inputs are submitted on one thread and presented
+on another in UE 5.3; the handover at submission works.
+
 ## To find out
 
 - ClipToPrevClip offset (searched at run time; logged).
@@ -87,5 +96,4 @@ carries over.
 - Whether 5.3 submits on its own thread (`kTagAtRecord`).
 - Streamline's interposer next to the game's FSR 3 frame interpolation swap chain
   (`r.FidelityFX.FI.OverrideSwapChainDX12=1`).
-- FSR upscaling and FSR frame generation in this game (from DoubleExposureDLSS, untested here).
-  NobodyTweaks 0.4.0 removed its FSR 3 frame generation option, so NobodyDLSS's is the only one.
+- NobodyTweaks 0.4.0 removed its FSR 3 frame generation option, so NobodyDLSS's is the only one.

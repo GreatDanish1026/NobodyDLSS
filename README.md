@@ -61,8 +61,8 @@ The overlay (ReShade's Add-ons tab) shows a one-line summary at the top, with **
    generation. Restart the game once.
 
 Tested with Steam build 14922697 at 3840x2160 with HDR (through NobodyTweaks) on an NVIDIA RTX
-card: DLSS upscaling and DLSS Frame Generation 2x. FSR upscaling and FSR Frame Generation come
-from DoubleExposureDLSS and haven't been tested in this game yet.
+card: DLSS upscaling, DLSS Frame Generation 2x, FSR 3.1 upscaling and FSR Frame Generation 2x. FSR 4
+on Radeon cards goes through the same code but hasn't been tested on one.
 
 To uninstall, delete those files (and the Engine.ini lines). Logs: `NobodyDLSS.log` next to the
 game's exe, Streamline's in `streamline\sl.log`.
