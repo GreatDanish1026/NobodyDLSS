@@ -77,6 +77,7 @@ struct Settings {
     // (trees, the satchel) marked them: noise. Without it FSR showed no trails (user, 2026-10-30).
     int fsrTransMask = 0;
 } g_set;
+bool g_directResources = false;  // ini DirectResources: DLSS on UE's own depth and output (see Own)
 
 int g_autoBackend = 0;  // what Auto resolved to (0: not tried yet)
 
@@ -108,6 +109,7 @@ void LoadSettings() {
     reshade::get_config_value(nullptr, RD_PRODUCT, "FsrShadingChange", g_set.fsrShading);
     if (!(g_set.fsrShading >= 0 && g_set.fsrShading <= 2)) g_set.fsrShading = 1.0f;
     reshade::get_config_value(nullptr, RD_PRODUCT, "Preset", g_set.preset);
+    reshade::get_config_value(nullptr, RD_PRODUCT, "DirectResources", g_directResources);
     reshade::get_config_value(nullptr, RD_PRODUCT, "DlssMode", g_set.mode);
     reshade::get_config_value(nullptr, RD_PRODUCT, "AnimationMask", g_set.maskMode);
     if (g_set.maskMode < 0 || g_set.maskMode >= kMaskModeCount) g_set.maskMode = 1;
@@ -367,6 +369,42 @@ struct CopyPool {
 
 std::recursive_mutex g_mutex;  // destroying resources can call back into OnDestroyResource
 CopyPool g_pool;
+
+// DLSS's depth input and output in textures of our own (committed), copied from and to UE's. In
+// this game (UE 5.3) DLSS's first evaluation on UE's own depth and TSR output failed inside NVIDIA's
+// driver (NvAPI_D3D12_LaunchCuKernelChain, 2026-11-01) and left the game's command list broken.
+// ini DirectResources=1 hands UE's textures to DLSS as DoubleExposureDLSS did (diagnosis).
+constexpr resource_usage kDepthRead = resource_usage::depth_stencil_read | resource_usage::shader_resource;
+struct OwnTexture {
+    uint32_t width = 0, height = 0;
+    format fmt = format::unknown;
+    bool depth = false;
+    resource tex = {0};
+};
+std::vector<OwnTexture> g_own;
+
+// Our depth (state kDepthRead) or output (state unordered_access) texture like <like>.
+resource Own(device* dev, resource like, bool depth) {
+    const resource_desc d = dev->get_resource_desc(like);
+    for (const OwnTexture& t : g_own)
+        if (t.width == d.texture.width && t.height == d.texture.height && t.fmt == d.texture.format && t.depth == depth)
+            return t.tex;
+    if (g_own.size() >= 8) return {0};
+    OwnTexture t;
+    t.width = d.texture.width, t.height = d.texture.height, t.fmt = d.texture.format, t.depth = depth;
+    const resource_usage usage = depth ? resource_usage::depth_stencil | resource_usage::shader_resource | resource_usage::copy_dest
+                                       : resource_usage::unordered_access | resource_usage::shader_resource |
+                                             resource_usage::copy_source;
+    const resource_desc nd(t.width, t.height, 1, 1, t.fmt, 1, memory_heap::default_, usage);
+    if (!dev->create_resource(nd, nullptr, depth ? kDepthRead : resource_usage::unordered_access, &t.tex)) {
+        Log("couldn't create our %ux%u %s texture (format %u)", t.width, t.height, depth ? "depth" : "output",
+            static_cast<uint32_t>(t.fmt));
+        return {0};
+    }
+    Log("created our %ux%u %s texture (format %u)", t.width, t.height, depth ? "depth" : "output", static_cast<uint32_t>(t.fmt));
+    g_own.push_back(t);
+    return t.tex;
+}
 
 // Linear colour formats DLSS takes. The game's scene colour is rgba16f with HDR output and
 // r11g11b10f with SDR output.
@@ -980,14 +1018,32 @@ bool Evaluate(command_list* cl, ListState& s, uint32_t x, uint32_t y, uint32_t z
     if (g_sizeByOutput.size() > 64) g_sizeByOutput.clear();
     const bool reset = rs == g_resetByOutput.end() || rs->second || resized;
 
+    resource depthIn = chain.depth, outputIn = output;
+    if (!g_directResources) {
+        depthIn = Own(dev, chain.depth, true), outputIn = Own(dev, output, false);
+        if (!depthIn.handle || !outputIn.handle) {
+            Skip("our depth or output texture couldn't be created");
+            return false;
+        }
+    }
+
     cl->dispatch(x, y, z);  // the game's UpdateHistory, with its own bindings
     cl->barrier(output, resource_usage::unordered_access, resource_usage::unordered_access);
+    if (depthIn != chain.depth) {
+        // UE keeps its depth in the combined read state around TSR (capture 2026-11-01).
+        const resource both[2] = {chain.depth, depthIn};
+        const resource_usage from[2] = {kDepthRead, kDepthRead};
+        const resource_usage to[2] = {resource_usage::copy_source, resource_usage::copy_dest};
+        cl->barrier(2, both, from, to);
+        cl->copy_resource(chain.depth, depthIn);
+        cl->barrier(2, both, to, from);
+    }
 
     dlss::Inputs in;
     in.color = reinterpret_cast<ID3D12Resource*>(chain.color.handle);
     in.motion = reinterpret_cast<ID3D12Resource*>(chain.motion.handle);
-    in.depth = reinterpret_cast<ID3D12Resource*>(chain.depth.handle);
-    in.output = reinterpret_cast<ID3D12Resource*>(output.handle);
+    in.depth = reinterpret_cast<ID3D12Resource*>(depthIn.handle);
+    in.output = reinterpret_cast<ID3D12Resource*>(outputIn.handle);
     if (g_set.maskMode > 0 || TransMask() > 0) in.biasMask = reinterpret_cast<ID3D12Resource*>(chain.mask.handle);
     in.renderWidth = rw, in.renderHeight = rh;
     g_lastRender[0] = rw, g_lastRender[1] = rh;
@@ -1017,6 +1073,14 @@ bool Evaluate(command_list* cl, ListState& s, uint32_t x, uint32_t y, uint32_t z
         fi.shadingChangeScale = g_set.fsrShading;
         fi.debugView = g_set.fsrDebug;
         ok = fsr::Evaluate(reinterpret_cast<ID3D12GraphicsCommandList*>(cl->get_native()), fi, err);
+    }
+    if (ok && outputIn != output) {
+        const resource both[2] = {outputIn, output};
+        const resource_usage from[2] = {resource_usage::unordered_access, resource_usage::unordered_access};
+        const resource_usage to[2] = {resource_usage::copy_source, resource_usage::copy_dest};
+        cl->barrier(2, both, from, to);
+        cl->copy_resource(outputIn, output);
+        cl->barrier(2, both, to, from);
     }
     cl->barrier(output, resource_usage::unordered_access, resource_usage::unordered_access);
     if (ok && g_set.showMask) {
@@ -1077,6 +1141,8 @@ void OnDestroyDevice(device* dev) {
     fsr::Shutdown();
     g_lastBackend = 0, g_autoBackend = 0;
     g_pool.Destroy(dev);
+    for (OwnTexture& t : g_own) dev->destroy_resource(t.tex);
+    g_own.clear();
     for (auto& [key, v] : g_motion.views) dev->destroy_resource_view(v);
     g_motion.views.clear();
     for (MotionState::Texture& t : g_motion.textures) dev->destroy_resource(t.tex);
