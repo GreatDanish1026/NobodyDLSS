@@ -49,6 +49,25 @@ crosses queues: DilateVelocity's link is passed on under DecimateHistory's u2 an
 UpdateHistory's t3. Translucency is still blended by TSR (UpdateHistory t1), so compose.hlsl
 carries over.
 
+## DLSS crashes and the game's own NGX (2026-11-01)
+
+- 0.1.0: DLSS feature created, first evaluation failed in NGX (`NvAPI_D3D12_LaunchCuKernelChain
+  failed - nvapi status -1`, 0xbad00002), which broke the command list: UE aborted at Close
+  (E_INVALIDARG).
+- 0.1.1 (own depth/output copies): access violation in D3D12Core inside NGX's CreateFeature.
+- The game's DLSS plugin starts NGX at every launch (its `Saved\Logs\NGX\NGX_<time>` folder),
+  even with TSR chosen. With `[SystemSettings] r.NGX.Enable=0` in the user's Engine.ini (backup
+  `Engine.ini.bak-nobodydlss`) DLSS ran: 120 of 120 frames upscaled, 1920x1080 -> 3840x2160.
+  0.1.2 writes that line itself when DLSS or DLSS frame generation is wanted, and doesn't start
+  NGX or Streamline while `r.NGX.Enable` is 1 this session. The own depth/output copies stay
+  (unproven either way; cheap).
+- 0.1.1 then crashed when a video ended: the game's Electra video decoder destroys its own device
+  and the add-on's destroy_device handlers cleaned up for any device. 0.1.2 only cleans up for the
+  game's device.
+- A crash 10 s after launch (before DLSS was on) in `FSlateRHIResourceManager::
+  FindOrCreateDynamicTextureResource` via the FSR 3 plugin's Slate renderer, around NobodyTweaks'
+  HDR switch: same signature as NobodyTweaks 0.3.2's crash, not this add-on.
+
 ## To find out
 
 - ClipToPrevClip offset (searched at run time; logged).
