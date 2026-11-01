@@ -87,5 +87,5 @@ carries over.
 - Whether 5.3 submits on its own thread (`kTagAtRecord`).
 - Streamline's interposer next to the game's FSR 3 frame interpolation swap chain
   (`r.FidelityFX.FI.OverrideSwapChainDX12=1`).
-- NobodyTweaks' FSR 3 frame generation option is to be removed once DLSS frame generation works
-  here (user, 2026-11-01); NobodyDLSS keeps its own FSR frame generation.
+- FSR upscaling and FSR frame generation in this game (from DoubleExposureDLSS, untested here).
+  NobodyTweaks 0.4.0 removed its FSR 3 frame generation option, so NobodyDLSS's is the only one.
