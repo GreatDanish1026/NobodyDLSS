@@ -25,23 +25,24 @@ const std::wstring& ExeDir();
 // FNV-1a of a compute pipeline's shader bytecode (0 if unknown): stable across runs.
 uint32_t PipeId(reshade::api::pipeline pipe);
 
-// TSR's compute shaders in this game (Nobody Wants to Die build 14922697, UE 5.3). Not mapped
-// yet: UE 5.3's passes may differ from 5.2's, so these are placeholders until a capture with TSR
-// chosen in the game's menu; kTsrMapped=false keeps DLSS and frame generation off.
-constexpr bool kTsrMapped = false;
+// TSR's compute shaders in this game (Nobody Wants to Die build 14922697, UE 5.3.2; capture
+// 2026-11-01, docs/FINDINGS.md), in the order they run. The first four run on the async compute
+// queue, the rest on the graphics queue. UE 5.3 has no ResolveHistory: UpdateHistory writes the
+// 3840x2160 output itself (history at 100%).
+constexpr bool kTsrMapped = true;
 // Frame generation's inputs go to their frame when the game submits them (false; UE 5.2 submits
 // and presents on the same thread) or when they're recorded (true, ReunionDLSS: UE 5.6 submits on
 // a thread of its own). To check for UE 5.3. framegen.cpp is shared with ReunionDLSS.
 constexpr bool kTagAtRecord = false;
-constexpr uint32_t kTsrClearPrevTextures = 0xfffffff0;
-constexpr uint32_t kTsrForwardScatterDepth = 0xfffffff1;
-constexpr uint32_t kTsrDilateVelocity = 0xfffffff2;     // t0 depth, t1 velocity -> u0 dilated velocity
-constexpr uint32_t kTsrDecimateHistory = 0xfffffff3;    // t0 = DilateVelocity's u0 (links the chain)
-constexpr uint32_t kTsrRejectShading = 0xfffffff4;
-constexpr uint32_t kTsrSpatialAntiAliasing = 0xfffffff5;
-constexpr uint32_t kTsrFilterAntiAliasing = 0xfffffff6;
-constexpr uint32_t kTsrUpdateHistory = 0xfffffff7;      // t0 scene colour, t1 separate translucency
-constexpr uint32_t kTsrResolveHistory = 0xfffffff8;     // t0 history -> u0 output
+constexpr uint32_t kTsrClearPrevTextures = 0x42e09aac;    // same id as UE 5.2
+constexpr uint32_t kTsrForwardScatterDepth = 0x52618d50;  // r32uint t0 -> u0 (name from 5.2's order)
+constexpr uint32_t kTsrDilateVelocity = 0x87b9be71;       // t0 depth, t1 velocity -> u0 dilated velocity
+constexpr uint32_t kTsrDecimateHistory = 0x090c206f;      // t0 = DilateVelocity's u0; u2 -> UpdateHistory t3
+constexpr uint32_t kTsrRejectShading = 0x161118cb;        // graphics queue from here
+constexpr uint32_t kTsrSpatialAntiAliasing = 0x93b776bc;
+constexpr uint32_t kTsrFilterAntiAliasing = 0x1c0a8a60;
+constexpr uint32_t kTsrUpdateHistory = 0xfa4cc3c5;        // t0 scene colour, t1 translucency, t3 link -> u0 output
+constexpr uint32_t kTsrResolveHistory = 0xfffffff8;       // none in UE 5.3 (placeholder, never matches)
 
 // upscaler.cpp
 void RegisterUpscaler();

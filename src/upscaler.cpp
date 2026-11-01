@@ -2,19 +2,18 @@
 //
 // TSR's intermediates are transient (their memory is reused within the frame), so the inputs are
 // taken while they exist:
-//   DilateVelocity (t0 depth, t1 engine velocity): our own motion vectors (motion.hlsl) are
-//     computed there into our own texture. The engine's velocity only covers moving objects; the
-//     camera's motion comes from the depth and View.ClipToPrevClip (found in the View uniform
-//     buffer from TemporalAAJitter). DilateVelocity is recorded in a different command list, so
-//     the result is found later through its output u0, which DecimateHistory reads (t0; in UE 5.6
-//     it was RejectShading's t8).
-//   UpdateHistory (t0 scene color, t1 separate translucency): UE 5.2's TSR blends translucency
-//     (particles, light beams, light shafts, outline materials) in itself, so compose.hlsl blends
-//     it into our own copy of the scene color; it also adds the translucency to the bias mask
-//   ResolveHistory (u0): the 3840x2160 output, and from its parameters the render size, jitter and
-//     motion vector scale (offsets 0, 256 and 272, docs/FINDINGS.md). The game's pass runs first
-//     (it also writes a half-resolution copy the post-processing uses), then DLSS overwrites the
-//     full output.
+//   DilateVelocity (t0 depth, t1 engine velocity; async compute queue in UE 5.3): our own motion
+//     vectors (motion.hlsl) are computed there into our own texture. The engine's velocity only
+//     covers moving objects; the camera's motion comes from the depth and View.ClipToPrevClip
+//     (found in the View uniform buffer from TemporalAAJitter). The result is passed on through
+//     DilateVelocity's u0, which DecimateHistory reads (t0), and DecimateHistory's u2, which
+//     UpdateHistory reads (t3) on the graphics queue.
+//   UpdateHistory (t0 scene color, t1 separate translucency, u0 the 3840x2160 output): TSR blends
+//     translucency (particles, light beams, light shafts) in itself, so compose.hlsl blends it into
+//     our own copy of the scene color and adds it to the bias mask. Its parameters give the render
+//     size, jitter and motion vector scale (offsets 0, 256 and 272, as in UE 5.2's ResolveHistory).
+//     UE 5.3 has no ResolveHistory: the game's pass runs first (it also writes a half-resolution
+//     copy the post-processing uses), then DLSS overwrites the full output.
 //
 // NGX records its own compute state and descriptor heaps on the game's command list, and the
 // engine assumes its state is unchanged afterwards. So every command list's compute and
@@ -748,13 +747,27 @@ void OnDilateVelocity(command_list* cl, ListState& s) {
     link.motion = ComputeMotion(cl, s, depth, velocity, &link.mask, &link.view);
 }
 
-// UE 5.2: DecimateHistory is the first pass after DilateVelocity that reads its output (t0);
-// RejectShading doesn't (5.6's read it at t8).
-void OnChainStart(command_list* cl, ListState& s) {
-    s.chain = Chain();
+// UE 5.3 runs DilateVelocity and DecimateHistory on the async compute queue, in a command list of
+// their own, and UpdateHistory on the graphics queue. DecimateHistory reads DilateVelocity's
+// output (t0); its u2 (rg16unorm) is what UpdateHistory reads at t3. So DecimateHistory passes
+// the link on under its u2, and UpdateHistory picks it up from its t3.
+void OnDecimateHistory(command_list* cl, ListState& s) {
     const resource dilated = Bound(cl, s.compute, 0, 0);
+    const resource next = Bound(cl, s.compute, 1, 2);
     auto it = g_links.find(dilated.handle);
     if (it == g_links.end()) return Why("chain: DilateVelocity not seen");
+    if (!next.handle) return Why("chain: DecimateHistory u2 missing");
+    Link copy = it->second;
+    if (g_links.size() > 64) g_links.clear();
+    g_links[next.handle] = std::move(copy);
+}
+
+// UpdateHistory: the chain's inputs, found through DecimateHistory's link (t3).
+void OnChainStart(command_list* cl, ListState& s) {
+    s.chain = Chain();
+    const resource linked = Bound(cl, s.compute, 0, 3);
+    auto it = g_links.find(linked.handle);
+    if (it == g_links.end()) return Why("chain: DecimateHistory not seen");
     s.chain.depth = it->second.depth;
     s.chain.motion = it->second.motion;  // none: TSR kept for this view
     s.chain.mask = it->second.mask;
@@ -879,10 +892,10 @@ int ActiveBackend(device* dev) {
 
 const char* BackendName(int b) { return b == kDlss ? "DLSS" : b == kFsr ? "FSR" : "Upscaler"; }
 
-// FSR wants the camera's near plane and vertical field of view. UE 5.2's View.ViewToClip is at byte
-// 512 of the View uniform buffer (docs/FINDINGS.md). UE's reversed-Z projection (row-major, row
+// FSR wants the camera's near plane and vertical field of view. UE 5.3's View.ViewToClip is at byte
+// 448 of the View uniform buffer (docs/FINDINGS.md). UE's reversed-Z projection (row-major, row
 // vector): [1][1] = 1 / tan(fovY / 2), [3][2] = near plane. Defaults when it doesn't look right.
-constexpr int kViewToClipFloat = 512 / 4;
+constexpr int kViewToClipFloat = 448 / 4;
 
 void CameraFromView(const std::vector<float>& view, float* nearPlane, float* fovY) {
     *nearPlane = 10, *fovY = 1.0f;
@@ -967,7 +980,7 @@ bool Evaluate(command_list* cl, ListState& s, uint32_t x, uint32_t y, uint32_t z
     if (g_sizeByOutput.size() > 64) g_sizeByOutput.clear();
     const bool reset = rs == g_resetByOutput.end() || rs->second || resized;
 
-    cl->dispatch(x, y, z);  // the game's ResolveHistory, with its own bindings
+    cl->dispatch(x, y, z);  // the game's UpdateHistory, with its own bindings
     cl->barrier(output, resource_usage::unordered_access, resource_usage::unordered_access);
 
     dlss::Inputs in;
@@ -1046,12 +1059,12 @@ bool OnDispatch(command_list* cl, uint32_t x, uint32_t y, uint32_t z) {
             OnDilateVelocity(cl, *s);
             return false;
         case kTsrDecimateHistory:
-            OnChainStart(cl, *s);
+            OnDecimateHistory(cl, *s);
             return false;
         case kTsrUpdateHistory:
+            // UE 5.3 has no ResolveHistory: UpdateHistory writes the output (u0) itself.
+            OnChainStart(cl, *s);
             OnUpdateHistory(cl, *s);
-            return false;
-        case kTsrResolveHistory:
             return Evaluate(cl, *s, x, y, z);
         default:
             return false;

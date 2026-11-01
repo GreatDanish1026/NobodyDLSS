@@ -55,12 +55,11 @@ namespace {
 
 constexpr const char* kProjectId = "6f1d6e2a-5b8c-4f2e-9a43-7c2b8e1d4a90";
 
-// Byte offsets in UE 5.2's View uniform buffer (FViewUniformShaderParameters), read from a capture
-// (docs/FINDINGS.md): 5.2 has one more matrix after TranslatedWorldToClip than 5.6, so the rest sit
-// 64 bytes later than in ReunionDLSS (which shares this file). Checked against the buffer at run
-// time (CheckCamera).
-constexpr uint32_t kTranslatedWorldToClip = 0, kRelativeWorldToClip = 128, kViewToTranslatedWorld = 320,
-                   kViewToClip = 512, kViewToClipNoAA = 576;
+// Byte offsets in UE 5.3's View uniform buffer (FViewUniformShaderParameters), read from a capture
+// (docs/FINDINGS.md): the same as UE 5.6 (ReunionDLSS, which shares this file); 5.2 had one more
+// matrix. Checked against the buffer at run time (CheckCamera).
+constexpr uint32_t kTranslatedWorldToClip = 0, kRelativeWorldToClip = 64, kViewToTranslatedWorld = 256,
+                   kViewToClip = 448, kViewToClipNoAA = 512;
 
 // Frame generation modes, as in The Quarry's add-on: Off, 2x, 3x, 4x (1-3 generated frames per
 // rendered frame) and Dynamic (Streamline picks the multiplier to reach the display's refresh rate).
