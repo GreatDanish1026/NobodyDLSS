@@ -3,4 +3,4 @@
 
 #define RD_PRODUCT "NobodyDLSS"  // add-on name, log file name, ReShade.ini section
 #define RD_GAME "Nobody Wants to Die"
-#define RD_VERSION "0.2.1"
+#define RD_VERSION "1.0.0"

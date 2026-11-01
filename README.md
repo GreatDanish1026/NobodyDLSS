@@ -1,4 +1,4 @@
-# NobodyDLSS 0.2.1
+# NobodyDLSS 1.0.0
 
 ReShade add-on for **Nobody Wants to Die** (Unreal Engine 5.3, DirectX 12) that replaces the
 game's TSR upscaler with **NVIDIA DLSS** or **AMD FSR**, and adds **DLSS Frame Generation** or
