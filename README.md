@@ -1,4 +1,4 @@
-# NobodyDLSS 1.0.0
+# NobodyDLSS 1.0.1
 
 ReShade add-on for **Nobody Wants to Die** (Unreal Engine 5.3, DirectX 12) that replaces the
 game's TSR upscaler with **NVIDIA DLSS** or **AMD FSR**, and adds **DLSS Frame Generation** or
@@ -45,7 +45,9 @@ r.FidelityFX.FI.OverrideSwapChainDX12=0
 ```
 
 The game's own DLSS and FSR frame generation menu options then do nothing; delete the lines to
-get them back.
+get them back. A read-only Engine.ini is fine: the add-on lifts the flag for its two lines and sets
+it again. If Windows still won't let it write the file (Controlled Folder Access, permissions),
+the overlay says so: add the lines by hand.
 
 The overlay (ReShade's Add-ons tab) shows a one-line summary at the top, with **Settings**,
 **Status** and **Advanced** tabs. Settings are saved in `ReShade.ini` under `[NobodyDLSS]`.

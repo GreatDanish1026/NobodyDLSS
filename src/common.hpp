@@ -50,12 +50,12 @@ constexpr uint32_t kTsrResolveHistory = 0xfffffff8;       // none in UE 5.3 (pla
 // TurnGameNgxOff: writes r.NGX.Enable=0 to the game's Engine.ini (read at the next launch).
 bool GameNgxRunning();
 void TurnGameNgxOff();
-extern const char* const kGameNgxRestart;  // the message shown while it's running
+const char* GameNgxMessage();  // the message shown while it's running (restart, or the lines by hand)
 // The same for the game's FSR 3 frame interpolation swapchain (r.FidelityFX.FI.OverrideSwapChainDX12),
 // which our frame generation can't sit next to.
 bool GameFiSwapchainOn();
 void TurnGameFiSwapchainOff();
-extern const char* const kGameFiRestart;
+const char* GameFiMessage();
 // Writes the lines above again (UE rewrites Engine.ini at exit, dropping them): at unload.
 void RewriteStartupOffs();
 

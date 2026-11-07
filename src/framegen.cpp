@@ -769,7 +769,7 @@ void Feature(sl::Feature f, T*& fn, const char* name) {
 
 bool InitStreamline(ID3D12Device* device, std::string& error) {
     if (GameNgxRunning()) {
-        error = kGameNgxRestart;
+        error = GameNgxMessage();
         return false;
     }
     static std::wstring dir;
@@ -865,8 +865,8 @@ void OnInitDevice(device* dev) {
     if (g_factoryHooked || !g_set.enabled) return;
     std::string err;
     if (GameFiSwapchainOn()) {
-        g_status = kGameFiRestart;
-        Log("frame generation: %s", kGameFiRestart);
+        g_status = GameFiMessage();
+        Log("frame generation: %s", GameFiMessage());
         return;
     }
     if (!HookFactory(err)) {

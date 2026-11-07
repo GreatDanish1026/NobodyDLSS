@@ -1174,9 +1174,20 @@ bool g_keyWasDown = false;
 // (NvAPI_D3D12_LaunchCuKernelChain, then an access violation in CreateFeature; 2026-11-01); with
 // it off DLSS ran. Our DLSS replaces the game's, so its own DLSS menu option is given up.
 
-const char* const kGameNgxRestart =
-    "restart the game once: its own DLSS plugin had NVIDIA's NGX running, which NobodyDLSS's DLSS can't share "
-    "(turned off in the game's Engine.ini for the next launch)";
+// Set when Engine.ini couldn't be written (even after lifting its read-only flag): the messages
+// then ask for the lines by hand instead of a restart that wouldn't help.
+std::atomic<bool> g_iniBlocked{false};
+
+const char* const kIniByHand =
+    "the game's Engine.ini can't be written (access denied: protected folder or permissions). Add these lines to "
+    "%LOCALAPPDATA%\\detnoir\\Saved\\Config\\Windows\\Engine.ini, then restart the game:\n"
+    "[SystemSettings]\nr.NGX.Enable=0\nr.FidelityFX.FI.OverrideSwapChainDX12=0";
+
+const char* GameNgxMessage() {
+    return g_iniBlocked ? kIniByHand
+                        : "restart the game once: its own DLSS plugin had NVIDIA's NGX running, which NobodyDLSS's DLSS "
+                          "can't share (turned off in the game's Engine.ini for the next launch)";
+}
 
 std::wstring GameEngineIni() {
     wchar_t buf[MAX_PATH] = {};
@@ -1197,10 +1208,33 @@ void WriteStartupOffNow(const wchar_t* name) {
     wchar_t value[16] = {};
     GetPrivateProfileStringW(L"SystemSettings", name, L"", value, 16, ini.c_str());
     if (wcscmp(value, L"0") == 0) return;
-    if (WritePrivateProfileStringW(L"SystemSettings", name, L"0", ini.c_str()))
+    if (WritePrivateProfileStringW(L"SystemSettings", name, L"0", ini.c_str())) {
         Log("%ls=0 written to %ls (from the next launch)", name, ini.c_str());
-    else
-        Log("couldn't write %ls to %ls (error %lu)", name, ini.c_str(), GetLastError());
+        return;
+    }
+    DWORD err = GetLastError();
+    // Players often make Engine.ini read-only to keep their own tweaks (a player's log, 1.0.0:
+    // error 5). Lift the flag for our lines and put it back: their tweaks stay protected, and UE
+    // can't drop our lines at exit either.
+    const DWORD attrs = GetFileAttributesW(ini.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY) &&
+        SetFileAttributesW(ini.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY)) {
+        const bool ok = WritePrivateProfileStringW(L"SystemSettings", name, L"0", ini.c_str()) != 0;
+        if (!ok) err = GetLastError();
+        SetFileAttributesW(ini.c_str(), attrs);
+        if (ok) {
+            Log("%ls=0 written to %ls (read-only: lifted for the write and set again; from the next launch)", name,
+                ini.c_str());
+            return;
+        }
+    }
+    g_iniBlocked = true;
+    static std::vector<std::wstring> logged;  // once per name (this runs at every load and unload)
+    for (const std::wstring& l : logged)
+        if (l == name) return;
+    logged.push_back(name);
+    Log("couldn't write %ls to %ls (error %lu%s): add it by hand under [SystemSettings]", name, ini.c_str(), err,
+        attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY) ? ", read-only" : "");
 }
 
 void WriteStartupOff(const wchar_t* name) {
@@ -1251,9 +1285,11 @@ bool GameNgxRunning() {
 // r.FidelityFX.FI.OverrideSwapChainDX12=1 (the game's default), even with its frame generation off.
 // Our frame generation (Streamline's or AMD's) replaces the swapchain too; one replacement at a
 // time, so it's turned off for ours (the game's own FSR frame generation option is given up).
-const char* const kGameFiRestart =
-    "restart the game once: its own FSR 3 plugin had replaced the swapchain, which frame generation can't share "
-    "(turned off in the game's Engine.ini for the next launch)";
+const char* GameFiMessage() {
+    return g_iniBlocked ? kIniByHand
+                        : "restart the game once: its own FSR 3 plugin had replaced the swapchain, which frame "
+                          "generation can't share (turned off in the game's Engine.ini for the next launch)";
+}
 
 void TurnGameFiSwapchainOff() { WriteStartupOff(L"r.FidelityFX.FI.OverrideSwapChainDX12"); }
 
